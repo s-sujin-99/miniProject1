@@ -1,0 +1,10 @@
+# 독립된 git 저장소 — 여기서 추적하면 gitlink로 깨져 커밋된다 (shrimp-rules.md §1)
+miniproject1-frontend/
+miniproject1-backend/
+shrimp_data/
+
+node_modules/
+.metadata/
+
+# 개인 로컬 설정
+.claude/settings.local.json
