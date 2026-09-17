@@ -8,3 +8,7 @@ node_modules/
 
 # 개인 로컬 설정
 .claude/settings.local.json
+
+# 공공데이터 API 키 등 로컬 비밀값 (tools/seed-generator)
+tools/**/.env
+tools/**/__pycache__/

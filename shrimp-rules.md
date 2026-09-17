@@ -22,20 +22,26 @@ D:\claude\miniProject1\              ← 저장소 ① 문서 + .claude 설정
 - 루트 `.gitignore`에서 `miniproject1-frontend/`, `miniproject1-backend/` 항목을 **삭제하지 않는다** (삭제 시 gitlink로 깨져 커밋됨).
 - GitHub 원격은 아직 없다. `git push`는 사용자 요청 시에만.
 
-### 1.2 백엔드 — `com.example` 레이어 구조 (확정)
+### 1.2 백엔드 — `com.pharmaprice` 도메인별 구조 (ROADMAP T-01 원문 적용, 2026-09-16 결정)
 
 ```
-src/main/java/com/example/
-├─ domain/       엔티티 + Repository
-├─ service/      비즈니스 로직, @Transactional 경계
-├─ controller/   REST API (@RestController)
-├─ dto/          요청/응답 DTO
-├─ config/       SecurityConfig, CorsConfig, OpenApiConfig, JPA Auditing
-└─ exception/    GlobalExceptionHandler, ErrorCode, BusinessException
+src/main/java/com/pharmaprice/
+├─ common/           예외, 응답 포맷, 설정 (config/, exception/, domain/의 BaseEntity·BaseTimeEntity)
+├─ auth/domain/       AppUser, UserRole, UserStatus, AuthProvider
+├─ auth/repository/
+├─ pharmacy/domain/   Pharmacy, Region
+├─ pharmacy/repository/
+├─ drug/domain/       Drug
+├─ drug/repository/
+├─ report/domain/     PriceReport, UploadedFile, ReportSource, ReportStatus, FlagReason
+├─ report/repository/
+├─ recommendation/domain/     PharmacyDrugPriceStat
+└─ recommendation/repository/
 ```
 
-- **도메인별 패키지(`com.pharmaprice.auth` 등)를 만들지 않는다.** ROADMAP의 `com.pharmaprice.*` 경로는 모두 위 레이어 구조로 치환해 읽는다 (예: `recommendation/service/ScoreCalculator` → `service/ScoreCalculator`).
-- 파일이 많아지면 레이어 **안에서** 하위 폴더를 쓴다 (`dto/auth/`, `dto/report/`). 레이어를 뒤집지 않는다.
+- 각 도메인 안은 `controller / service / repository / domain / dto`. 아직 없는 계층은 실제로 클래스가 생길 때 만든다 (빈 `package-info.java` 선반영 금지).
+- **이전에는 `com.example` 레이어 구조(도메인 안 X, 최상위 domain/service/controller/dto/config/exception)를 썼으나, 2026-09-16에 ROADMAP.md T-01 원문(도메인별 구조)으로 되돌렸다.** 기존 엔티티·리포지토리·설정·예외 클래스 전체를 위 구조로 이동·검증 완료(`./mvnw test` BUILD SUCCESS). git 저장소 3개 분리 구조(§1.1)는 그대로 유지한다 — 이번 결정은 **패키지 구조에만** 적용된다.
+- 도메인 간 참조는 명시적 import로 연결한다 (예: `report.domain.PriceReport`가 `auth.domain.AppUser`, `pharmacy.domain.Pharmacy`, `drug.domain.Drug`, `common.domain.BaseEntity`를 import).
 
 #### ⚠️ Jackson 3 (Spring Boot 4.1의 breaking change, 실제로 겪은 문제)
 
@@ -67,7 +73,7 @@ miniproject1-frontend/
 
 | 항목 | 기존 문서 | **현재 규칙** |
 |---|---|---|
-| 패키지 | `com.pharmaprice` 도메인별 | `com.example` 레이어별 (§1.2) |
+| 패키지 | `com.pharmaprice` 도메인별 | ROADMAP과 동일 — `com.pharmaprice` 도메인별 (§1.2). 2026-09-16 이전엔 `com.example` 레이어별로 운영했으나 되돌림 |
 | Access Token | 30분 + Refresh 14일 회전 | **24시간, Refresh Token 없음.** `refresh_token` 테이블·`/auth/refresh` 구현하지 않음. 로그아웃 = 프론트 토큰 삭제 |
 | 비밀번호 | 8~64자, 영문+숫자 | **6자 이상** (`@Size(min = 6, max = 64)`) |
 | 소셜 로그인 | 비목표 | **Google OAuth2 필수** (§5.3) |
