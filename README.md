@@ -1,8 +1,8 @@
 # 약값알림
 
-> **이 문서는 초안입니다.** 아직 클린 환경(새 디렉터리에 처음부터 클론)에서 전체 절차를 재현 검증하지 않았습니다. 인증·제보 CRUD 등 핵심 기능이 구현되고 나면(ROADMAP.md T-37) 데모 시나리오(DEMO.md)와 함께 완성본으로 갱신합니다.
-
 약국별 일반의약품(OTC) 가격을 크라우드소싱으로 모아 사용자 위치 기준 최저가를 추천하는 미니 프로젝트입니다. 자세한 배경과 목표는 [PRD.md](./PRD.md)를 참고하세요.
+
+데모 시나리오는 [DEMO.md](./DEMO.md)를 참고하세요.
 
 > ⚠️ **본 서비스의 가격은 학습용 예시 데이터입니다.** 데이터는 대부분 목데이터(시드)이며 실제 판매가가 아닙니다.
 
@@ -83,7 +83,7 @@ cp miniproject1-frontend/.env.example miniproject1-frontend/.env
 | `DB_USERNAME` / `DB_PASSWORD` | DB 접속 계정 |
 | `JWT_SECRET` | 32바이트 이상 랜덤 문자열 |
 | `JWT_EXPIRATION_MS` | 토큰 만료 시간(ms), 기본 24시간 |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth2 (아직 미구현) |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth2 로그인용. 비워두면 `/oauth2/authorization/google`만 비활성화되고 나머지는 정상 동작 |
 | `FRONTEND_URL` | CORS·OAuth 리다이렉트용 |
 | `UPLOAD_DIR` | 영수증 이미지 등 로컬 업로드 경로 |
 
@@ -94,12 +94,22 @@ cp miniproject1-frontend/.env.example miniproject1-frontend/.env
 | `NEXT_PUBLIC_API_BASE_URL` | 백엔드 API 주소 |
 | `NEXT_PUBLIC_KAKAO_MAP_KEY` | 카카오 지도 JavaScript 키 |
 
+## 기본 계정
+
+시드 데이터(V2__seed_master.sql)에 포함된 테스트 계정입니다. 실제 서비스 계정이 아닙니다.
+
+| 이메일 | 비밀번호 | 권한 |
+|---|---|---|
+| `admin@example.com` | `Admin1234!` | ADMIN |
+| `user01@example.com` ~ `user20@example.com` | `User1234!` | USER |
+
 ## 문서
 
 - [PRD.md](./PRD.md) — 요구사항
 - [API.md](./API.md) — API 명세
 - [DATABASE.md](./DATABASE.md) — DB 스키마
 - [ROADMAP.md](./ROADMAP.md) — 개발 로드맵
+- [DEMO.md](./DEMO.md) — 데모 시나리오
 - [shrimp-rules.md](./shrimp-rules.md) — AI 에이전트용 개발 규칙 (위 문서들과 충돌 시 이 문서가 우선)
 
 ## 트러블슈팅
@@ -107,11 +117,6 @@ cp miniproject1-frontend/.env.example miniproject1-frontend/.env
 - **포트 충돌**: 5432(PostgreSQL) · 8080(backend) · 3000(frontend) 중 하나가 이미 쓰이고 있다면 해당 프로세스를 종료하거나 포트를 바꿉니다.
 - **`pg_trgm` 확장 설치 권한 오류**: 일반 계정(`pharmaprice`)으로 `CREATE EXTENSION`을 실행하면 "만들 권한이 없습니다" 에러가 납니다. `postgres` 슈퍼유저 계정으로 실행해야 합니다.
 - **JDK 버전 불일치**: `./mvnw compile` 시 Maven이 `[21,22)` 범위를 벗어난 JDK를 감지하면 빌드 시작 단계(`validate`)에서 바로 실패 메시지를 냅니다. `java -version`으로 21인지 확인하세요.
-
-## TODO
-
-다음 항목은 아직 구현되지 않아 이 README에 채우지 않았습니다. 관련 기능이 완성되면(ROADMAP.md T-35~T-37) 추가합니다.
-
-- 기본 계정 정보(회원가입/로그인 기능 구현 후)
-- 데모 시나리오(`DEMO.md`)
-- 클린 클론 환경에서의 전체 재현 검증
+- **`ddl-auto: validate` 실패**: 엔티티와 실제 스키마가 어긋나면(마이그레이션을 건너뛰고 엔티티만 수정한 경우 등) 기동 자체가 실패합니다. `flyway_schema_history`를 확인하고, 필요하면 스키마를 `DROP SCHEMA ... CASCADE`로 비운 뒤 재기동해 V1~V3을 처음부터 다시 적용하세요.
+- **Flyway 체크섬 불일치(`FlywayValidateException: Migration checksum mismatch`)**: 이미 적용된 마이그레이션 파일(`V1__init.sql` 등)의 내용을 수정하면 발생합니다. 마이그레이션은 적용 후 절대 수정하지 말고, 스키마 변경이 필요하면 새 버전(`V4__...`)을 추가하세요. 로컬 개발 중이라 데이터를 버려도 된다면 스키마를 비우고 재기동하는 것이 가장 빠른 해결책입니다.
+- **카카오 지도 키 도메인 미등록**: 카카오 개발자 콘솔에 등록한 도메인과 접속 도메인(`localhost:3000` 등)이 다르면 지도가 빈 화면으로 뜨고 콘솔에 `401`/도메인 오류가 남습니다. 콘솔의 "플랫폼 > Web" 설정에 접속 도메인을 추가하세요.
