@@ -821,6 +821,26 @@ recommendation:
 
 ---
 
+### `GET /api/v1/admin/stats/top-reporters` 👑
+
+제보를 가장 많이 남긴 사용자 Top N.
+
+**Query Parameters**: `limit` (기본 10, 최대 50)
+
+**Response `200 OK`**
+
+```json
+{
+  "rows": [
+    { "reporter": { "id": 4, "nickname": "제보왕", "email": "user04@example.com" }, "reportCount": 128 }
+  ]
+}
+```
+
+REJECTED 상태로 전환된 제보는 집계에서 제외한다(`AppUser.reportCount`와 동일 기준).
+
+---
+
 ### `GET /api/v1/admin/price-reports` 👑
 
 제보 관리 목록. (F4-5)
@@ -888,6 +908,7 @@ recommendation:
 | GET | `/api/v1/admin/stats/regions` | 👑 | P2 |
 | GET | `/api/v1/admin/stats/drugs/{drugId}` | 👑 | P2 |
 | GET | `/api/v1/admin/stats/price-gaps` | 👑 | P2 |
+| GET | `/api/v1/admin/stats/top-reporters` | 👑 | P2 |
 | GET | `/api/v1/admin/price-reports` | 👑 | P2 |
 | PATCH | `/api/v1/admin/price-reports/{reportId}` | 👑 | P2 |
 
