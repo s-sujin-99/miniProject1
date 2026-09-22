@@ -318,6 +318,7 @@
   "lat": 37.5012,
   "lng": 127.0396,
   "phone": "02-555-1234",
+  "photoUrl": null,
   "businessHours": {
     "mon": ["09:00", "19:00"],
     "tue": ["09:00", "19:00"],
@@ -348,7 +349,7 @@
 }
 ```
 
-`drugPrices` 는 `repPrice` 오름차순 정렬.
+`drugPrices` 는 `repPrice` 오름차순 정렬. `photoUrl` 은 현재 데이터 소스(공공데이터)에 약국 사진이 없어 항상 `null` — 컬럼만 미리 열어두었다.
 
 ---
 

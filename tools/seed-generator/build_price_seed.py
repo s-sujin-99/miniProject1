@@ -31,41 +31,88 @@ def _clamp_price(price: float) -> int:
     return max(100, min(200000, int(price)))
 
 
+# 홈 화면 인기 약품 칩(app/page.tsx POPULAR_DRUGS)과 맞춘 목록 — 전국 어디서 이 이름으로
+# 검색해도 결과가 나오게 별도로 두껍게 채운다(카탈로그 전체에서 뽑는 무작위 배분은 인기
+# 브랜드를 우대하지 않아, 데모 때 실제로 쳐볼 법한 이름이 빈 결과로 나올 수 있다).
+_POPULAR_DRUG_KEYWORDS = ["타이레놀", "게보린", "판콜에이", "베아제", "부루펜", "챔프시럽", "훼스탈골드", "판피린큐"]
+_POPULAR_TOTAL_REPORTS = 20_000
+
+
+def _make_reports_for_pairs(pairs, factor, reporter_ids, seen_user_pair_day, next_id, keep_prob=1.0):
+    """(약국, 약품) 쌍마다 1~6건의 제보를 만든다. price_report id 카운터를 이어받아 반환한다."""
+    reports: list[dict] = []
+    for p, d in pairs:
+        if keep_prob < 1.0 and random.random() > keep_prob:
+            continue
+        for _ in range(random.randint(1, 6)):
+            user_id = random.choice([None] + reporter_ids)
+            age = int(120 * random.random() ** 1.6)  # 최근 쪽에 몰리게(ROADMAP T-08 §3)
+            if user_id is not None:
+                key = (p.id, d.id, user_id, age)
+                if key in seen_user_pair_day:
+                    continue  # 실제 앱이라면 중복 제보로 막혔을 조합 — 시드에도 만들지 않는다
+                seen_user_pair_day.add(key)
+
+            price = _clamp_price(round(d.base_price * factor[p.id] * random.gauss(1, 0.05), -1))
+            reports.append({
+                "id": next_id,
+                "pharmacy_id": p.id,
+                "drug_id": d.id,
+                "user_id": user_id,
+                "price": price,
+                "age": age,
+                "flagged": False,
+                "flag_reason": None,
+            })
+            next_id += 1
+    return reports, next_id
+
+
 def generate_price_reports(pharmacies, drugs, users) -> list[dict]:
-    """DATABASE.md §6.2 규칙 그대로: 약국별 price_factor, 60% 커버리지, 2% 오타 시뮬레이션."""
+    """DATABASE.md §6.2 규칙 그대로: 약국별 price_factor, 60% 커버리지, 2% 오타 시뮬레이션.
+
+    약국(전국 확장 시 최대 25,760건) × 의약품(전량 적재 시 최대 4,779건)을 전수 대조하면
+    조합이 수천만~수억 건으로 폭발해 마이그레이션 SQL 파일이 커밋 불가능한 크기가 된다
+    (GitHub 파일당 100MB 한도). 그래서 (1) 가격 데이터를 가질 약국을 최대 _MAX_PRICED_PHARMACIES
+    곳만 무작위로 뽑고, (2) 뽑힌 약국마다 전체 카탈로그가 아니라 무작위 부분집합(취급 품목)만
+    대조한다. 나머지 약국은 실제 주소·전화번호는 그대로 유지한 채 "아직 제보가 없는" 상태로
+    남는다 — 크라우드소싱 서비스에서 실제로 벌어지는 정상적인 상태이며, 앱은 이미 이 상태를
+    "정보 부족"/빈 검색 결과로 처리한다(PRD F3-8, F3-9).
+
+    이어서 _POPULAR_DRUG_KEYWORDS에 해당하는 약은 위 무작위 배분과 별개로, 훨씬 많은 약국에
+    걸쳐 추가로 채운다(총 _POPULAR_TOTAL_REPORTS건 목표) — 데모에서 실제로 검색해볼 이름은
+    전국 어디서든 결과가 나와야 하기 때문이다.
+    """
     reporter_ids = [u.id for u in users if u.role == "USER"]
     factor = {p.id: random.uniform(0.85, 1.25) for p in pharmacies}
-
-    reports: list[dict] = []
-    # uq_report_user_pair_day(V1__init.sql)가 "같은 사용자·같은 (약국,약품)·같은 날"을 막는다 —
-    # 시드도 실제 앱과 같은 규칙을 지켜야 한다. user_id가 있는 제보만 (pharmacy, drug, user, day) 단위로 추적한다.
     seen_user_pair_day: set[tuple[int, int, int, int]] = set()
     next_id = 1
-    for p in pharmacies:
-        for d in drugs:
-            if random.random() > 0.60:  # 커버리지 60% — 전부 채우면 현실감이 없다
-                continue
-            for _ in range(random.randint(1, 6)):
-                user_id = random.choice([None] + reporter_ids)
-                age = int(120 * random.random() ** 1.6)  # 최근 쪽에 몰리게(ROADMAP T-08 §3)
-                if user_id is not None:
-                    key = (p.id, d.id, user_id, age)
-                    if key in seen_user_pair_day:
-                        continue  # 실제 앱이라면 중복 제보로 막혔을 조합 — 시드에도 만들지 않는다
-                    seen_user_pair_day.add(key)
 
-                price = _clamp_price(round(d.base_price * factor[p.id] * random.gauss(1, 0.05), -1))
-                reports.append({
-                    "id": next_id,
-                    "pharmacy_id": p.id,
-                    "drug_id": d.id,
-                    "user_id": user_id,
-                    "price": price,
-                    "age": age,
-                    "flagged": False,
-                    "flag_reason": None,
-                })
-                next_id += 1
+    _MAX_PRICED_PHARMACIES = 5000
+    _ASSORTMENT_RANGE = (15, 35)  # 약국 한 곳이 가격 정보를 가질 법한 취급 품목 수
+    priced_pharmacies = random.sample(pharmacies, k=min(len(pharmacies), _MAX_PRICED_PHARMACIES))
+    pairs = [
+        (p, d)
+        for p in priced_pharmacies
+        for d in random.sample(drugs, min(len(drugs), random.randint(*_ASSORTMENT_RANGE)))
+    ]
+    reports, next_id = _make_reports_for_pairs(
+        pairs, factor, reporter_ids, seen_user_pair_day, next_id, keep_prob=0.60,
+    )
+
+    popular_drugs = [d for d in drugs if any(k in d.display_name for k in _POPULAR_DRUG_KEYWORDS)]
+    if popular_drugs:
+        # 평균 3.5건/쌍(1~6건 균등분포)을 가정해 목표 건수에 맞춰 약품당 약국 수를 역산한다.
+        pharmacies_per_drug = min(len(pharmacies), round(_POPULAR_TOTAL_REPORTS / len(popular_drugs) / 3.5))
+        popular_pairs = [
+            (p, d)
+            for d in popular_drugs
+            for p in random.sample(pharmacies, pharmacies_per_drug)
+        ]
+        popular_reports, next_id = _make_reports_for_pairs(
+            popular_pairs, factor, reporter_ids, seen_user_pair_day, next_id,
+        )
+        reports += popular_reports
 
     # 전체의 2%는 오타를 낸 것처럼 price를 덮어쓴다 — T-10의 IQR 필터가 걸러내는 걸 보여주는 게 목적이라
     # 대부분은 flagged=false로 남기고, 관리자 화면(T-32) 데모용으로 일부만 flagged=true로 표시한다.
@@ -165,6 +212,10 @@ def _self_check() -> list[dict]:
     reports = generate_price_reports(pharmacies, drugs, users)
 
     assert len(reports) >= 3000, f"price_report가 3000건 미만: {len(reports)}"
+    assert len(reports) < 1_000_000, (
+        f"price_report가 {len(reports)}건 — 마이그레이션 파일이 git에 커밋하기엔 너무 커진다. "
+        "assortment 범위/_MAX_PRICED_PHARMACIES를 줄여라."
+    )
     outlier_ratio = sum(1 for r in reports if r["flagged"]) / len(reports)
     assert 0 <= outlier_ratio < 0.02, f"flagged 비율이 예상 밖: {outlier_ratio}"
     assert all(100 <= r["price"] <= 200000 for r in reports), "CHECK(price) 범위를 벗어난 행이 있다"

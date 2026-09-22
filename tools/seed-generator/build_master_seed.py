@@ -3,19 +3,28 @@
 실행: python build_master_seed.py
   → miniproject1-backend/src/main/resources/db/migration/V2__seed_master.sql 생성.
 
-약국(pharmacy)은 우선순위대로 데이터 소스를 고른다:
-  1) data/pharmacy_raw.json — 국립중앙의료원 전국 약국 정보 API(fetch_pharmacy_api.py)로
-     32개 지역(Q0/Q1)을 이미 필터링해 받은 실데이터.
-  2) data/pharmacy_raw.csv — 심평원류 CSV 원본(수동으로 이 자리에 넣은 경우).
-  3) 위 둘 다 없으면 현실적인 분포의 합성 데이터로 폴백 — 이 경우 상호·주소는 전부 가상이며
+약국(pharmacy)·지역(region)은 우선순위대로 데이터 소스를 고른다:
+  1) data/2.약국정보서비스(2026.6.).xlsx — 심평원 전국 약국 현황 원본(전국, ~25,760건).
+     region은 시군구코드를 그대로 region.code로 쓰고(합성 코드가 아니라 실제 행정표준코드다),
+     center_lat/lng은 그 시군구 소속 약국들의 평균 좌표로 근사한다(시청/구청 좌표를 별도로
+     구하지 않아도 되는 실용적 근사 — openpyxl 필요, `pip install openpyxl`).
+  2) data/pharmacy_raw.json — 국립중앙의료원 전국 약국 정보 API(fetch_pharmacy_api.py)로
+     32개 지역(Q0/Q1)만 필터링해 받은 실데이터(1)이 없을 때의 폴백).
+  3) data/pharmacy_raw.csv — 심평원류 CSV 원본(수동으로 이 자리에 넣은 경우).
+  4) 위 셋 다 없으면 현실적인 분포의 합성 데이터로 폴백 — 이 경우 상호·주소는 전부 가상이며
      실존 업체와 무관하다.
-region의 code는 통계청 행정표준코드가 아닌 이 스크립트만의 합성 값이다(행정구역명·구청 근사
-좌표는 공개 정보).
+2)~4) 경로에서 region.code는 통계청 행정표준코드가 아닌 이 스크립트만의 합성 값(R01..)이다.
 
-의약품(drug)은 _DRUG_SEED가 실존 일반의약품 상품명이며, item_seq는 data.go.kr e약은요 API
-(fetch_drug_api.py)로 실제 조회해 확인한 식약처 품목기준코드다(매칭 안 된 일부는 MOCKDRUG-
-코드로 폴백). category/package_unit/base_price는 e약은요 API에 없는 필드라 ROADMAP T-07 §4
-지침대로 수기 입력이다 — 이건 공공데이터 미비가 아니라 애초에 그 API의 제공 범위 밖이다.
+의약품(drug)도 우선순위가 있다:
+  1) data/drug_raw.json — 식약처 e약은요 API(fetch_drug_api.py) 원본을 전량(~4,779건) 적재.
+     category/package_unit/base_price는 이 API 제공 범위 밖이라 category="기타" 고정,
+     package_unit은 임의 후보 중 선택, base_price는 임의값으로 채운다 — 실사용자 제보가
+     쌓이면 어차피 가격은 크라우드소싱 데이터로 대체되므로 base_price는 초기 노이즈 생성용
+     기준값일 뿐이다. otc_flag는 이 API에 전문/일반 구분 필드가 없어 전부 true로 채운다 —
+     F1-6(전문의약품 제외)을 온전히 만족하지 못한다는 뜻이니 데모 목적 밖에서 쓸 때는 주의.
+  2) 위가 없으면 _DRUG_SEED(30종, 실존 상품명 수기 큐레이션 — item_seq는 fetch_drug_api.py로
+     실제 조회해 확인한 식약처 품목기준코드, category/package_unit/base_price는 ROADMAP T-07
+     §4 지침대로 수기 입력)로 폴백한다.
 
 재실행해도 같은 결과가 나오도록 random.seed를 모듈 로드 시 한 번만 고정한다.
 """
@@ -162,6 +171,7 @@ class Drug:
     form: str
     package_unit: str
     base_price: int
+    image_url: str | None = None
 
 
 @dataclass
@@ -175,6 +185,10 @@ class AppUserSeed:
 
 
 def generate_regions() -> list[Region]:
+    xlsx_data = _load_regions_and_pharmacies_from_xlsx()
+    if xlsx_data is not None:
+        return xlsx_data[0]
+
     return [
         Region(code=f"R{idx:02d}", sido=sido, sigungu=sigungu, center_lat=lat, center_lng=lng)
         for idx, (sido, sigungu, lat, lng) in enumerate(_REGION_SEED, start=1)
@@ -358,7 +372,117 @@ def _load_real_pharmacies_from_api(regions: list[Region]) -> list[Pharmacy] | No
     return candidates
 
 
+_PHARMACY_XLSX_PATH = Path(__file__).resolve().parent / "data" / "2.약국정보서비스(2026.6.).xlsx"
+
+# 심평원 xlsx의 시도코드명은 축약형("경기","충남")이라 화면에 보여줄 정식 명칭으로 바꾼다.
+_SIDO_FULL_NAMES: dict[str, str] = {
+    "서울": "서울특별시", "부산": "부산광역시", "대구": "대구광역시", "인천": "인천광역시",
+    "광주": "광주광역시", "대전": "대전광역시", "울산": "울산광역시", "세종시": "세종특별자치시",
+    "경기": "경기도", "강원": "강원특별자치도", "충북": "충청북도", "충남": "충청남도",
+    "전북": "전북특별자치도", "전남": "전라남도", "경북": "경상북도", "경남": "경상남도",
+    "제주": "제주특별자치도",
+}
+
+_xlsx_pharmacy_cache: tuple[list[Region], list[Pharmacy]] | None = None
+_xlsx_pharmacy_cache_loaded = False
+
+
+def _load_regions_and_pharmacies_from_xlsx() -> tuple[list[Region], list[Pharmacy]] | None:
+    """data/2.약국정보서비스(2026.6.).xlsx(전국 약국 원본, ~25,760건)가 있으면 전국 데이터를 쓴다.
+
+    region.code는 이 파일의 시군구코드(행정표준코드)를 그대로 쓴다 — 2)~4) 경로의 R01.. 합성
+    코드와 달리 실제 코드다. center_lat/lng은 그 시군구 소속 약국들의 평균 좌표로 근사한다(시청/
+    구청 좌표를 별도로 조사하지 않아도 되는 실용적 근사이며, "반경 몇 km 내 약국" 검색의 폴백
+    중심점 용도라 정밀한 행정 중심점일 필요는 없다).
+    결과를 모듈 전역에 캐싱해 generate_regions()/generate_pharmacies()가 같은 데이터를 본다
+    (region이 pharmacy 좌표에서 파생되므로 두 함수를 따로 호출해도 일관돼야 한다).
+    """
+    global _xlsx_pharmacy_cache, _xlsx_pharmacy_cache_loaded
+    if _xlsx_pharmacy_cache_loaded:
+        return _xlsx_pharmacy_cache
+    _xlsx_pharmacy_cache_loaded = True
+
+    if not _PHARMACY_XLSX_PATH.exists():
+        return None
+    try:
+        import openpyxl
+    except ImportError:
+        print("openpyxl이 없어 xlsx 전국 데이터를 건너뛴다. `pip install openpyxl` 후 다시 실행하라.",
+              file=sys.stderr)
+        return None
+
+    wb = openpyxl.load_workbook(_PHARMACY_XLSX_PATH, read_only=True)
+    ws = wb.worksheets[0]
+
+    raw_rows: list[dict] = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        (_enc, name, _jong_code, jong_name, _sido_code, sido_name, sgg_code, sgg_name,
+         _eupmyeondong, _zip, addr, tel, _opened, x, y) = row
+        if jong_name != "약국" or not name or not x or not y:
+            continue
+        try:
+            lat, lng = float(y), float(x)
+        except (TypeError, ValueError):
+            continue
+        if lat == 0 or lng == 0:
+            continue
+        raw_rows.append({
+            "name": str(name).strip(),
+            "sido_name": str(sido_name).strip(),
+            "sgg_code": str(sgg_code).strip(),
+            "sgg_name": str(sgg_name).strip(),
+            "addr": str(addr).strip() if addr else "",
+            "tel": str(tel).strip() if tel else "",
+            "lat": lat,
+            "lng": lng,
+        })
+
+    if len(raw_rows) < 300:
+        print(f"xlsx에서 유효한 약국이 {len(raw_rows)}건뿐이다(300건 미만) — 다음 폴백으로 넘어간다.",
+              file=sys.stderr)
+        _xlsx_pharmacy_cache = None
+        return None
+
+    by_sgg: dict[str, list[dict]] = {}
+    for r in raw_rows:
+        by_sgg.setdefault(r["sgg_code"], []).append(r)
+
+    regions = [
+        Region(
+            code=sgg_code,
+            sido=_SIDO_FULL_NAMES.get(rows[0]["sido_name"], rows[0]["sido_name"]),
+            sigungu=rows[0]["sgg_name"],
+            center_lat=sum(r["lat"] for r in rows) / len(rows),
+            center_lng=sum(r["lng"] for r in rows) / len(rows),
+        )
+        for sgg_code, rows in by_sgg.items()
+    ]
+
+    pharmacies = [
+        Pharmacy(
+            id=idx,
+            hira_code=f"NW-{idx:06d}",  # 암호화요양기호는 VARCHAR(30)보다 길어 직접 쓸 수 없다 — 순번 코드로 대체
+            name=r["name"],
+            address_road=r["addr"] or "주소 미상",
+            address_jibun=None,
+            region_code=r["sgg_code"],
+            lat=r["lat"],
+            lng=r["lng"],
+            phone=r["tel"],
+            business_hours=random.choice(_BUSINESS_HOURS_TEMPLATES),
+        )
+        for idx, r in enumerate(raw_rows, start=1)
+    ]
+
+    _xlsx_pharmacy_cache = (regions, pharmacies)
+    return _xlsx_pharmacy_cache
+
+
 def generate_pharmacies(regions: list[Region]) -> list[Pharmacy]:
+    xlsx_data = _load_regions_and_pharmacies_from_xlsx()
+    if xlsx_data is not None:
+        return xlsx_data[1]
+
     real = _load_real_pharmacies_from_api(regions) or _load_real_pharmacies(regions)
     if real is not None:
         return real
@@ -389,7 +513,62 @@ def generate_pharmacies(regions: list[Region]) -> list[Pharmacy]:
     return pharmacies
 
 
+_DRUG_JSON_PATH = Path(__file__).resolve().parent / "data" / "drug_raw.json"
+# e약은요 API엔 포장단위가 없어 임의로 고른다 — 실제 판매 단위와 무관하다.
+_PACKAGE_UNIT_CHOICES = ["1개", "1병", "10정", "20정", "30정", "50ml", "100ml", "1box"]
+_DRUG_PRICE_CHOICES = range(1000, 30001, 100)  # 임의가격 후보(기존 수기 큐레이션 30종과 같은 자릿수대)
+
+
+def _load_drugs_from_api() -> list[Drug] | None:
+    """data/drug_raw.json(fetch_drug_api.py의 출력, e약은요 전량)이 있으면 전량 적재한다.
+
+    category/package_unit/base_price/otc_flag은 이 API 제공 범위 밖이라 채워 넣는 값이다
+    (category="기타" 고정, package_unit/base_price는 임의, otc_flag는 전문/일반 구분 필드가
+    없어 전부 true — F1-6을 온전히 만족하지 못한다). item_seq/maker/name/image_url은 실제
+    API 값 그대로다.
+    """
+    if not _DRUG_JSON_PATH.exists():
+        return None
+
+    raw: list[dict] = json.loads(_DRUG_JSON_PATH.read_text(encoding="utf-8"))
+    drugs: list[Drug] = []
+    seen_item_seq: set[str] = set()
+    next_id = 1
+    for item in raw:
+        name = (item.get("itemName") or "").strip()
+        if not name:
+            continue
+        item_seq = (item.get("itemSeq") or "").strip()[:20]
+        if not item_seq or item_seq in seen_item_seq:
+            item_seq = f"MOCKDRUG-{next_id:05d}"
+        seen_item_seq.add(item_seq)
+
+        drugs.append(Drug(
+            id=next_id,
+            item_seq=item_seq,
+            name=name[:200],
+            display_name=name[:100],
+            maker=(item.get("entpName") or "").strip()[:100],
+            category="기타",
+            form="",
+            package_unit=random.choice(_PACKAGE_UNIT_CHOICES),
+            base_price=random.choice(_DRUG_PRICE_CHOICES),
+            image_url=(item.get("itemImage") or "").strip() or None,
+        ))
+        next_id += 1
+
+    if len(drugs) < 30:
+        print(f"drug_raw.json에서 유효한 의약품이 {len(drugs)}건뿐이다(30건 미만) — 수기 큐레이션으로 폴백한다.",
+              file=sys.stderr)
+        return None
+    return drugs
+
+
 def generate_drugs() -> list[Drug]:
+    real = _load_drugs_from_api()
+    if real is not None:
+        return real
+
     return [
         Drug(id=idx, item_seq=item_seq or f"MOCKDRUG-{idx:03d}", name=name, display_name=display_name,
              maker=maker, category=category, form=form, package_unit=package_unit, base_price=base_price)
@@ -412,6 +591,11 @@ def generate_users() -> list[AppUserSeed]:
 def _sql_str(value: str) -> str:
     """SQL 문자열 리터럴로 변환한다(작은따옴표만 이중화하면 되는 단순 케이스)."""
     return "'" + value.replace("'", "''") + "'"
+
+
+def _sql_str_or_null(value: str | None) -> str:
+    """None/빈 문자열은 NULL로, 그 외엔 _sql_str로."""
+    return "NULL" if not value else _sql_str(value)
 
 
 def _render_sql(regions: list[Region], pharmacies: list[Pharmacy], drugs: list[Drug],
@@ -446,11 +630,11 @@ def _render_sql(regions: list[Region], pharmacies: list[Pharmacy], drugs: list[D
 
     lines.append("-- drug")
     lines.append("INSERT INTO drug (id, item_seq, name, display_name, maker, category, form, package_unit, "
-                  "otc_flag, base_price, created_at) VALUES")
+                  "otc_flag, base_price, image_url, created_at) VALUES")
     lines.append(",\n".join(
         f"    ({d.id}, {_sql_str(d.item_seq)}, {_sql_str(d.name)}, {_sql_str(d.display_name)}, "
-        f"{_sql_str(d.maker)}, {_sql_str(d.category)}, {_sql_str(d.form)}, {_sql_str(d.package_unit)}, "
-        f"true, {d.base_price}, now())"
+        f"{_sql_str_or_null(d.maker)}, {_sql_str(d.category)}, {_sql_str_or_null(d.form)}, "
+        f"{_sql_str(d.package_unit)}, true, {d.base_price}, {_sql_str_or_null(d.image_url)}, now())"
         for d in drugs
     ) + "\nON CONFLICT (item_seq) DO NOTHING;")
     lines.append("")
@@ -487,12 +671,13 @@ def _self_check() -> None:
     drugs = generate_drugs()
     users = generate_users()
 
-    assert 30 <= len(regions) <= 34, f"region 개수가 예상 밖: {len(regions)}"
+    assert len(regions) >= 30, f"region 개수가 예상 밖: {len(regions)}"
+    assert len({r.code for r in regions}) == len(regions), "region code가 중복된다(UNIQUE 제약 위반)"
     assert len(pharmacies) >= 300, f"pharmacy가 300건 미만: {len(pharmacies)}"
     assert all(p.lat != 0 and p.lng != 0 for p in pharmacies), "좌표가 0인 행이 있다"
     assert len({p.id for p in pharmacies}) == len(pharmacies), "pharmacy id가 중복된다"
     assert len({p.hira_code for p in pharmacies}) == len(pharmacies), "pharmacy hira_code가 중복된다(UNIQUE 제약 위반)"
-    assert 30 <= len(drugs) <= 50, f"drug 개수가 예상 밖: {len(drugs)}"
+    assert len(drugs) >= 30, f"drug 개수가 예상 밖: {len(drugs)}"
     assert len({d.item_seq for d in drugs}) == len(drugs), "drug item_seq가 중복된다(UNIQUE 제약 위반)"
     assert len(users) == 21, f"app_user가 21명이 아니다: {len(users)}"
 
