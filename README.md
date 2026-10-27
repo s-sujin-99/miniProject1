@@ -6,6 +6,21 @@
 
 > ⚠️ **본 서비스의 가격은 학습용 예시 데이터입니다.** 데이터는 대부분 목데이터(시드)이며 실제 판매가가 아닙니다.
 
+## 화면
+
+| 메인 | 검색 결과 · 지도 |
+|---|---|
+| ![메인](docs/screenshots/01-home.png) | ![검색 결과](docs/screenshots/02-search.png) |
+| **약국 상세** | **관리자 대시보드** |
+| ![약국 상세](docs/screenshots/03-pharmacy.png) | ![관리자 대시보드](docs/screenshots/04-admin-dashboard.png) |
+| **지역별 가격 격차 Top10** | |
+| ![가격 격차](docs/screenshots/05-admin-price-gap.png) | |
+
+## 저장소
+
+- 프론트엔드 (Next.js 16): https://github.com/s-sujin-99/miniproject1-frontend
+- 백엔드 (Spring Boot 4.1.1): https://github.com/s-sujin-99/miniproject1-backend
+
 ## 요구 사항
 
 - JDK 21
